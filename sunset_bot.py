@@ -55,7 +55,7 @@ def handle_test(message):
         pantilthat.tilt(-25)
         time.sleep(2)
         
-        # Take a quick burst of 5 photos for the test video
+        # Take a quick burst of 30 photos for the test video
         os.makedirs("test_data", exist_ok=True)
         for i in range(30):
             take_photo(f"test_data/frame_{i:04d}.jpg")
@@ -65,7 +65,7 @@ def handle_test(message):
 
         # Compile the mini-video
         ffmpeg_cmd = [
-            "ffmpeg", "-y", "-framerate", "5", "-pattern_type", "glob",
+            "ffmpeg", "-y", "-framerate", "10", "-pattern_type", "glob",
             "-i", "test_data/*.jpg", "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-vf", "scale=1024:-2", "test_video.mp4"
         ]
