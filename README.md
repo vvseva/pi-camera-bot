@@ -4,6 +4,8 @@ An automated and interactive camera system built for the Raspberry Pi 5. This pr
 1. **The Brother Dusk Bot:** Runs in the background, calculates the exact time of sunset for a specific location, moves the camera to the optimal angle, takes an auto-focused photo, and publishes it to a Telegram channel.
 2. **The Brother Day Bot:** Provides a game-controller-style keyboard inside Telegram to manually pan, tilt, and snap photos on demand.
 
+!()[images/controls.png]
+
 ## 🛠 Prerequisites
 
 ### Hardware
