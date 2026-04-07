@@ -48,7 +48,7 @@ def post_to_channel(photo_file, video_file=None, is_test=False):
 # --- TELEGRAM COMMANDS ---
 @bot.message_handler(commands=['test'])
 def handle_test(message):
-    bot.reply_to(message, "Running channel post test... taking a photo and generating a 5-second mini-timelapse 📸")
+    bot.reply_to(message, "Running channel post test... taking a photo and generating a 30-second mini-timelapse 📸")
     try:
         # Move camera for the test
         pantilthat.pan(0)
@@ -57,7 +57,7 @@ def handle_test(message):
         
         # Take a quick burst of 5 photos for the test video
         os.makedirs("test_data", exist_ok=True)
-        for i in range(5):
+        for i in range(30):
             take_photo(f"test_data/frame_{i:04d}.jpg")
             
         # Copy the first frame to act as our "main" static picture
