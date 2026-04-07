@@ -1,0 +1,16 @@
+[Unit]
+Description=Sunset Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vvseva
+WorkingDirectory=/home/vvseva/pi_bots
+# Use the Python from inside the virtual environment
+ExecStart=/home/vvseva/pi_bots/bot_env/bin/python /home/vvseva/pi_bots/sunset_bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
