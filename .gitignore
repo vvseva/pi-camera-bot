@@ -1,0 +1,15 @@
+# Ignore environment variables / secrets
+.env
+
+# Ignore the virtual environment folder
+bot_env/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore local test photos
+*.jpg
+*.jpeg
+*.png
+*.mp4
