@@ -144,14 +144,14 @@ def get_next_sunset_timings():
     s = sun(CITY.observer, date=now)
     sunset_time = s["sunset"]
     
-    start_time = sunset_time - timedelta(minutes=20)
-    end_time = sunset_time + timedelta(minutes=10)
+    start_time = sunset_time - timedelta(minutes=15)
+    end_time = sunset_time + timedelta(minutes=15)
 
     if now > start_time:
         s = sun(CITY.observer, date=now + timedelta(days=1))
         sunset_time = s["sunset"]
-        start_time = sunset_time - timedelta(minutes=20)
-        end_time = sunset_time + timedelta(minutes=10)
+        start_time = sunset_time - timedelta(minutes=15)
+        end_time = sunset_time + timedelta(minutes=15)
 
     print(f"Next capture begins at {start_time.astimezone().strftime('%Y-%m-%d %H:%M:%S')}.")
     return start_time, sunset_time, end_time
@@ -204,7 +204,7 @@ def sunset_loop():
             print("Capturing done. Stitching video...")
             output_video = "sunset_timelapse.mp4"
             ffmpeg_cmd = [
-                "ffmpeg", "-y", "-framerate", "15", "-pattern_type", "glob",
+                "ffmpeg", "-y", "-framerate", "30", "-pattern_type", "glob",
                 "-i", "sunset_data/*.jpg", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                 "-vf", "scale=1024:-2", output_video
             ]
