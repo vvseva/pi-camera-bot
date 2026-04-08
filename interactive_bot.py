@@ -4,13 +4,15 @@ import subprocess
 import threading
 import shutil
 import logging
+import math
+import cv2
+import numpy as np
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 import pantilthat
 from dotenv import load_dotenv
 
 # --- LOGGING SETUP ---
-# This will log to your console (and systemd journal) with timestamps
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load the environment variables from the .env file
@@ -37,6 +39,53 @@ current_tilt = 0
 pantilthat.pan(current_pan)
 pantilthat.tilt(current_tilt)
 time.sleep(1)
+
+# --- COMPUTER VISION: HORIZON LEVELING ---
+def calculate_horizon_angle(image_path):
+    """Detects the horizon line and returns the exact rotation angle needed to level it."""
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if img is None: 
+        return 0.0
+        
+    edges = cv2.Canny(img, 50, 150, apertureSize=3)
+    lines = cv2.HoughLines(edges, 1, np.pi/180, 200)
+    
+    angles = []
+    if lines is not None:
+        for line in lines:
+            rho, theta = line[0]
+            angle_deg = math.degrees(theta) - 90
+            
+            # Filter for roughly horizontal lines (within 15 degrees)
+            if -15 < angle_deg < 15:
+                angles.append(angle_deg)
+                
+    # Return the inverse median angle to determine the correction rotation
+    return -np.median(angles) if angles else 0.0
+
+def align_image(image_path, angle):
+    """Rotates the image to level the horizon and dynamically crops out black corners."""
+    if abs(angle) < 0.1:
+        return # Skip processing if the image is already perfectly flat
+
+    img = cv2.imread(image_path)
+    if img is None:
+        return
+        
+    h, w = img.shape[:2]
+    center = (w // 2, h // 2)
+    
+    # Calculate scale factor to dynamically crop out the black triangles caused by rotation
+    rad = math.radians(abs(angle))
+    denominator = math.cos(rad) - max(w/h, h/w) * math.sin(rad)
+    scale = 1.0 / denominator if denominator > 0 else 1.2
+
+    # Perform the rotation and crop
+    M = cv2.getRotationMatrix2D(center, angle, scale)
+    rotated = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC)
+    
+    # Overwrite the original file with the leveled version
+    cv2.imwrite(image_path, rotated)
 
 def snap_picture(filename="manual_photo.jpg"):
     """Centralized, thread-safe camera function."""
@@ -82,46 +131,47 @@ def handle_timelapse(message):
             return
 
     logging.info(f"TIMELAPSE: User @{user.username} (ID: {user.id}) started a {duration_minutes}-min capture.")
-    bot.reply_to(message, f"⏱️ Starting a {duration_minutes}-minute timelapse! I will send the GIF when it's finished.")
+    bot.reply_to(message, f"⏱️ Starting a {duration_minutes}-minute timelapse! I will auto-level the frames and send the video when it's finished.")
 
     # Start the capture process in the background so it doesn't freeze the bot
     threading.Thread(target=process_timelapse, args=(message.chat.id, user.id, duration_minutes), daemon=True).start()
 
 def process_timelapse(chat_id, user_id, duration_minutes):
-    """Background task to capture images, stitch video, and clean up."""
-    # Create an isolated folder for this specific user's timelapse
+    """Background task to capture images, auto-level, stitch video, and clean up."""
     user_dir = f"timelapse_data_{user_id}"
     os.makedirs(user_dir, exist_ok=True)
     
     total_seconds = duration_minutes * 60
-    
-    # Calculate interval dynamically: Longer timelapses take photos less frequently.
-    # We aim for roughly ~30 to 45 frames total to keep the output snappy.
-    # The absolute minimum wait between shots is 5 seconds to give the camera sensor time.
     interval_seconds = max(5, int(total_seconds / 30)) 
     
     end_time = time.time() + total_seconds
     frame_count = 0
+    horizon_angle = None # Will store the angle calculated from the first frame
 
     try:
         while time.time() < end_time:
-            # Format filename as frame_0001.jpg, frame_0002.jpg for sequential sorting
             frame_name = os.path.join(user_dir, f"frame_{frame_count:04d}.jpg")
             try:
                 snap_picture(frame_name)
+                
+                # Calculate angle on the very first frame of the timelapse
+                if horizon_angle is None:
+                    horizon_angle = calculate_horizon_angle(frame_name)
+                    logging.info(f"TIMELAPSE: Detected horizon tilt {horizon_angle:.2f}°. Applying to sequence.")
+                    
+                # Apply the calculated angle to this frame
+                align_image(frame_name, horizon_angle)
+                
                 frame_count += 1
             except Exception as e:
-                logging.error(f"Failed to capture frame: {e}")
+                logging.error(f"Failed to capture/align frame: {e}")
             
-            # Wait before taking the next photo
             time.sleep(interval_seconds)
 
         bot.send_message(chat_id, "🎬 Capture complete! Stitching photos together (this takes a minute)...")
         
-        # Output video filename
         output_file = f"timelapse_{user_id}.mp4"
         
-        # Use FFmpeg to combine images into an MP4 (scales down to 1024px wide for Telegram size limits)
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-framerate", "10", "-pattern_type", "glob",
             "-i", f"{user_dir}/*.jpg", "-c:v", "libx264", "-pix_fmt", "yuv420p",
@@ -129,13 +179,10 @@ def process_timelapse(chat_id, user_id, duration_minutes):
         ]
         subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        # Send the file as an MP4 (Telegram automatically loops it like a GIF)
         with open(output_file, "rb") as video:
             bot.send_video(chat_id, video)
             
         logging.info(f"TIMELAPSE: Successfully sent to User ID {user_id}. Cleaning up.")
-        
-        # Delete the final video file
         os.remove(output_file)
 
     except Exception as e:
@@ -143,7 +190,6 @@ def process_timelapse(chat_id, user_id, duration_minutes):
         logging.error(f"Timelapse Error: {e}")
         
     finally:
-        # ABSOLUTE CLEANUP: Delete the entire user directory and all raw photos inside it
         if os.path.exists(user_dir):
             shutil.rmtree(user_dir)
 
@@ -200,14 +246,18 @@ def handle_keyboard_buttons(message):
 
     elif action == "📸 Take Photo":
         user = message.from_user
-        # LOGGING WHO TOOK THE PHOTO
         logging.info(f"MANUAL PHOTO: User @{user.username} (ID: {user.id}) took a photo.")
         
         msg = bot.send_message(message.chat.id, "Taking photo... 📸")
         filename = "manual_photo.jpg"
         try:
-            # Using our new thread-safe snap function
             snap_picture(filename)
+            
+            # --- AUTO-LEVEL THE MANUAL PHOTO ---
+            angle = calculate_horizon_angle(filename)
+            align_image(filename, angle)
+            logging.info(f"MANUAL PHOTO: Auto-leveled by {angle:.2f}°")
+            
             with open(filename, "rb") as photo:
                 bot.send_photo(message.chat.id, photo)
             bot.delete_message(chat_id=message.chat.id, message_id=msg.message_id)
