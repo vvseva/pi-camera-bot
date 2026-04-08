@@ -1,0 +1,27 @@
+name: Deploy to Raspberry Pi
+
+# Trigger this workflow every time code is pushed to the main branch
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    # This tells GitHub to route the job to the agent installed on your Pi
+    runs-on: self-hosted
+
+    steps:
+      - name: Update Code and Restart Bots
+        run: |
+          # 1. Navigate to your actual bot directory
+          cd /home/vvseva/pi_bots
+          
+          # 2. Pull the latest code from GitHub
+          git pull origin main
+          
+          # 3. Reload systemd (in case you updated the .service files)
+          sudo systemctl daemon-reload
+          
+          # 4. Restart the bots so they load the new Python code
+          sudo systemctl restart interactive_bot.service
+          sudo systemctl restart sunset_bot.service
