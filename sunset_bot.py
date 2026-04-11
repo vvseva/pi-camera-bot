@@ -74,7 +74,7 @@ def align_image(image_path, angle):
 
 # --- CAMERA FUNCTIONS ---
 def take_photo(filename="sunset.jpg"):
-    subprocess.run(["rpicam-still", "-o", filename, "-t", "2000", "--vflip", "--hflip", "--camera", "0", "--autofocus-mode", "auto", "--awb", "auto"], check=True)
+    subprocess.run(["rpicam-still", "-o", filename, "-t", "00", "--vflip", "--hflip", "--camera", "0", "--autofocus-mode", "auto", "--awb", "auto"], check=True)
 
 def post_to_channel(photo_file, video_file=None, is_test=False):
     print("Posting to Telegram channel...")
@@ -122,7 +122,7 @@ def handle_test(message):
 
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-framerate", "5", "-pattern_type", "glob",
-            "-i", "test_data/*.jpg", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-i", "test_data/*.jpg", "-c:v", "libx264", "-pix_fmt", "yuv4p",
             "-vf", "scale=1024:-2", "test_video.mp4"
         ]
         subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -144,14 +144,14 @@ def get_next_sunset_timings():
     s = sun(CITY.observer, date=now)
     sunset_time = s["sunset"]
     
-    start_time = sunset_time - timedelta(minutes=15)
-    end_time = sunset_time + timedelta(minutes=15)
+    start_time = sunset_time - timedelta(minutes=20)
+    end_time = sunset_time + timedelta(minutes=20)
 
     if now > start_time:
         s = sun(CITY.observer, date=now + timedelta(days=1))
         sunset_time = s["sunset"]
-        start_time = sunset_time - timedelta(minutes=15)
-        end_time = sunset_time + timedelta(minutes=15)
+        start_time = sunset_time - timedelta(minutes=20)
+        end_time = sunset_time + timedelta(minutes=20)
 
     print(f"Next capture begins at {start_time.astimezone().strftime('%Y-%m-%d %H:%M:%S')}.")
     return start_time, sunset_time, end_time
@@ -205,7 +205,7 @@ def sunset_loop():
             output_video = "sunset_timelapse.mp4"
             ffmpeg_cmd = [
                 "ffmpeg", "-y", "-framerate", "30", "-pattern_type", "glob",
-                "-i", "sunset_data/*.jpg", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-i", "sunset_data/*.jpg", "-c:v", "libx264", "-pix_fmt", "yuv4p",
                 "-vf", "scale=1024:-2", output_video
             ]
             subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
