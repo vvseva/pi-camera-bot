@@ -99,8 +99,6 @@ def post_to_channel(photo_file, video_file=None, is_test=False):
 def handle_test(message):
     bot.reply_to(message, "Running channel post test... taking photos, auto-leveling, and generating video 📸")
     try:
-        pantilthat.pan(0)
-        pantilthat.tilt(-25)
         time.sleep(2)
         
         os.makedirs("test_data", exist_ok=True)
@@ -164,8 +162,6 @@ def sunset_loop():
 
         if now >= start_time:
             print("Sunset sequence started! Moving camera...")
-            pantilthat.pan(0)
-            pantilthat.tilt(-25)
             time.sleep(2)
 
             os.makedirs("sunset_data", exist_ok=True)
