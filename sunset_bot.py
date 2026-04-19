@@ -25,28 +25,49 @@ CITY = LocationInfo("Norrköping", "Sweden", "Europe/Stockholm", 58.5812, 16.182
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- COMPUTER VISION: HORIZON LEVELING ---
+def detect_horizon_line(image_grayscaled):
+    """Detect the horizon's starting and ending points in the given image.
+    The horizon line is detected by applying Otsu's threshold method.
+    """
+    msg = ('`image_grayscaled` should be a grayscale, 2-dimensional image '
+           'of shape (height, width).')
+    assert image_grayscaled.ndim == 2, msg
+    image_blurred = cv2.GaussianBlur(image_grayscaled, ksize=(3, 3), sigmaX=0)
+
+    _, image_thresholded = cv2.threshold(
+        image_blurred, thresh=0, maxval=1,
+        type=cv2.THRESH_BINARY+cv2.THRESH_OTSU
+    )
+    image_thresholded = image_thresholded - 1
+    image_closed = cv2.morphologyEx(image_thresholded, cv2.MORPH_CLOSE,
+                                    kernel=np.ones((9, 9), np.uint8))
+
+    horizon_x1 = 0
+    horizon_x2 = image_grayscaled.shape[1] - 1
+    
+    # Safe extraction: fallback to 0 tilt if sky/ground separation fails
+    try:
+        horizon_y1 = max(np.where(image_closed[:, horizon_x1] == 0)[0])
+        horizon_y2 = max(np.where(image_closed[:, horizon_x2] == 0)[0])
+    except ValueError:
+        horizon_y1 = image_grayscaled.shape[0] // 2
+        horizon_y2 = image_grayscaled.shape[0] // 2
+
+    return horizon_x1, horizon_x2, horizon_y1, horizon_y2
+
 def calculate_horizon_angle(image_path):
-    """Detects the horizon line and returns the exact rotation angle needed to level it."""
+    """Calculates the rotation angle needed using Otsu horizon detection."""
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None: 
         return 0.0
         
-    edges = cv2.Canny(img, 50, 150, apertureSize=3)
-    lines = cv2.HoughLines(edges, 1, np.pi/180, 200)
-    
-    angles = []
-    if lines is not None:
-        for line in lines:
-            rho, theta = line[0]
-            angle_deg = math.degrees(theta) - 90
-            
-            # Filter for roughly horizontal lines (within 15 degrees)
-            if -15 < angle_deg < 15:
-                angles.append(angle_deg)
-                
-    # Return the inverse median angle to determine the correction rotation, 
-    # or 0.0 if the horizon is obscured by clouds/buildings
-    return -np.median(angles) if angles else 0.0
+    try:
+        x1, x2, y1, y2 = detect_horizon_line(img)
+        angle_rad = math.atan2(y2 - y1, x2 - x1)
+        return math.degrees(angle_rad)
+    except Exception as e:
+        print(f"Horizon angle calculation failed: {e}")
+        return 0.0
 
 def align_image(image_path, angle):
     """Rotates the image to level the horizon and dynamically crops out black corners."""
