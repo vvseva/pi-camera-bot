@@ -13,6 +13,7 @@ import pantilthat
 from dotenv import load_dotenv
 
 # --- LOGGING SETUP ---
+# This will log to your console (and systemd journal) with timestamps
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load the environment variables from the .env file
@@ -41,27 +42,54 @@ pantilthat.tilt(current_tilt)
 time.sleep(1)
 
 # --- COMPUTER VISION: HORIZON LEVELING ---
+def detect_horizon_line(image_grayscaled):
+    """Detect the horizon's starting and ending points in the given image
+
+    The horizon line is detected by applying Otsu's threshold method to
+    separate the sky from the remainder of the image.
+    """
+    msg = ('`image_grayscaled` should be a grayscale, 2-dimensional image '
+           'of shape (height, width).')
+    assert image_grayscaled.ndim == 2, msg
+    image_blurred = cv2.GaussianBlur(image_grayscaled, ksize=(3, 3), sigmaX=0)
+
+    _, image_thresholded = cv2.threshold(
+        image_blurred, thresh=0, maxval=1,
+        type=cv2.THRESH_BINARY+cv2.THRESH_OTSU
+    )
+    image_thresholded = image_thresholded - 1
+    image_closed = cv2.morphologyEx(image_thresholded, cv2.MORPH_CLOSE,
+                                    kernel=np.ones((9, 9), np.uint8))
+
+    horizon_x1 = 0
+    horizon_x2 = image_grayscaled.shape[1] - 1
+    
+    # Safe extraction: if image is pure black/white and separation fails, fallback to 0 tilt
+    try:
+        horizon_y1 = max(np.where(image_closed[:, horizon_x1] == 0)[0])
+        horizon_y2 = max(np.where(image_closed[:, horizon_x2] == 0)[0])
+    except ValueError:
+        horizon_y1 = image_grayscaled.shape[0] // 2
+        horizon_y2 = image_grayscaled.shape[0] // 2
+
+    return horizon_x1, horizon_x2, horizon_y1, horizon_y2
+
 def calculate_horizon_angle(image_path):
-    """Detects the horizon line and returns the exact rotation angle needed to level it."""
+    """Calculates the rotation angle needed using Otsu horizon detection."""
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None: 
         return 0.0
         
-    edges = cv2.Canny(img, 50, 150, apertureSize=3)
-    lines = cv2.HoughLines(edges, 1, np.pi/180, 200)
-    
-    angles = []
-    if lines is not None:
-        for line in lines:
-            rho, theta = line[0]
-            angle_deg = math.degrees(theta) - 90
-            
-            # Filter for roughly horizontal lines (within 15 degrees)
-            if -15 < angle_deg < 15:
-                angles.append(angle_deg)
-                
-    # Return the inverse median angle to determine the correction rotation
-    return -np.median(angles) if angles else 0.0
+    try:
+        x1, x2, y1, y2 = detect_horizon_line(img)
+        # math.atan2 calculates the angle in radians. 
+        # In image coordinates (where Y increases downwards), this perfectly matches 
+        # the rotation needed to bring the right side back up/down to level.
+        angle_rad = math.atan2(y2 - y1, x2 - x1)
+        return math.degrees(angle_rad)
+    except Exception as e:
+        logging.error(f"Horizon angle calculation failed: {e}")
+        return 0.0
 
 def align_image(image_path, angle):
     """Rotates the image to level the horizon and dynamically crops out black corners."""
@@ -138,10 +166,15 @@ def handle_timelapse(message):
 
 def process_timelapse(chat_id, user_id, duration_minutes):
     """Background task to capture images, auto-level, stitch video, and clean up."""
+    # Create an isolated folder for this specific user's timelapse
     user_dir = f"timelapse_data_{user_id}"
     os.makedirs(user_dir, exist_ok=True)
     
     total_seconds = duration_minutes * 60
+    
+    # Calculate interval dynamically: Longer timelapses take photos less frequently.
+    # We aim for roughly ~30 to 45 frames total to keep the output snappy.
+    # The absolute minimum wait between shots is 5 seconds to give the camera sensor time.
     interval_seconds = max(5, int(total_seconds / 30)) 
     
     end_time = time.time() + total_seconds
@@ -150,6 +183,7 @@ def process_timelapse(chat_id, user_id, duration_minutes):
 
     try:
         while time.time() < end_time:
+            # Format filename as frame_0001.jpg, frame_0002.jpg for sequential sorting
             frame_name = os.path.join(user_dir, f"frame_{frame_count:04d}.jpg")
             try:
                 snap_picture(frame_name)
@@ -166,12 +200,15 @@ def process_timelapse(chat_id, user_id, duration_minutes):
             except Exception as e:
                 logging.error(f"Failed to capture/align frame: {e}")
             
+            # Wait before taking the next photo
             time.sleep(interval_seconds)
 
         bot.send_message(chat_id, "🎬 Capture complete! Stitching photos together (this takes a minute)...")
         
+        # Output video filename
         output_file = f"timelapse_{user_id}.mp4"
         
+        # Use FFmpeg to combine images into an MP4 (scales down to 1024px wide for Telegram size limits)
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-framerate", "10", "-pattern_type", "glob",
             "-i", f"{user_dir}/*.jpg", "-c:v", "libx264", "-pix_fmt", "yuv420p",
@@ -179,10 +216,13 @@ def process_timelapse(chat_id, user_id, duration_minutes):
         ]
         subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
+        # Send the file as an MP4 (Telegram automatically loops it like a GIF)
         with open(output_file, "rb") as video:
             bot.send_video(chat_id, video)
             
         logging.info(f"TIMELAPSE: Successfully sent to User ID {user_id}. Cleaning up.")
+        
+        # Delete the final video file
         os.remove(output_file)
 
     except Exception as e:
@@ -190,6 +230,7 @@ def process_timelapse(chat_id, user_id, duration_minutes):
         logging.error(f"Timelapse Error: {e}")
         
     finally:
+        # ABSOLUTE CLEANUP: Delete the entire user directory and all raw photos inside it
         if os.path.exists(user_dir):
             shutil.rmtree(user_dir)
 
@@ -246,11 +287,13 @@ def handle_keyboard_buttons(message):
 
     elif action == "📸 Take Photo":
         user = message.from_user
+        # LOGGING WHO TOOK THE PHOTO
         logging.info(f"MANUAL PHOTO: User @{user.username} (ID: {user.id}) took a photo.")
         
         msg = bot.send_message(message.chat.id, "Taking photo... 📸")
         filename = "manual_photo.jpg"
         try:
+            # Using our new thread-safe snap function
             snap_picture(filename)
             
             # --- AUTO-LEVEL THE MANUAL PHOTO ---
