@@ -170,7 +170,7 @@ def get_next_sunset_timings():
         s = sun(CITY.observer, date=now + timedelta(days=1))
         sunset_time = s["sunset"]
         start_time = sunset_time - timedelta(minutes=20)
-        end_time = sunset_time + timedelta(minutes=20)
+        end_time = sunset_time + timedelta(minutes=30)
 
     print(f"Next capture begins at {start_time.astimezone().strftime('%Y-%m-%d %H:%M:%S')}.")
     return start_time, sunset_time, end_time
